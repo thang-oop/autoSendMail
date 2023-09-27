@@ -1,0 +1,61 @@
+image: registry.access.redhat.com/ubi8/openjdk-8
+
+variables:
+  CI_REGISTRY_IMAGE: registry.pvcb.vn/pvcombank/cntt/nhl/report
+  JIB_FROM_IMAGE: mirror.pvcb.vn/library/openjdk:8-jdk-alpine
+  GIT_STRATEGY: clone
+
+cache:
+  key: '$CI_COMMIT_REF_NAME'
+  paths:
+    - .maven/
+stages:
+  - check
+  - build
+  - deploy
+before_script:
+  - mkdir -p ~/.m2
+  - |
+    cat > ~/.m2/settings.xml << EOF
+    <?xml version="1.0" encoding="UTF-8"?>
+    <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd">
+      <mirrors>
+        <mirror>
+          <id>PVcomBank</id>
+          <name>PVcomBank Maven Repository Manager</name>
+          <url>https://mirror.pvcb.vn/repository/maven-public-group/</url>
+          <mirrorOf>*</mirrorOf>
+        </mirror>
+      </mirrors>
+    </settings>
+    EOF
+  - sed -i 's|https://repo.maven.apache.org/maven2|https://mirror.pvcb.vn/repository/maven-public-group|' .mvn/wrapper/maven-wrapper.properties
+  - export MAVEN_USER_HOME=`pwd`/.maven
+
+maven-compile:
+  stage: build
+  script:
+    - ./mvnw package
+  artifacts:
+    paths:
+      - target
+    expire_in: 1 day
+  tags:
+    - ace-shell
+    #- shared-shell-ace
+#    - vm-runner
+
+build-image:
+  stage: deploy
+  image: mirror.pvcb.vn/docker:23-cli
+  services:
+    - name: mirror.pvcb.vn/docker:23-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $CI_REGISTRY_IMAGE/report:$CI_COMMIT_TAG .
+    - docker push $CI_REGISTRY_IMAGE/report:$CI_COMMIT_TAG
+
